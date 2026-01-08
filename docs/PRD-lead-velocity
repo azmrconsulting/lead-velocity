@@ -1,0 +1,173 @@
+# Product Requirements Document: Lead Velocity (FSBO AI Caller)
+
+## Overview
+
+Automated system that scrapes FSBO listings, calls owners via AI voice, qualifies them, and books appointments with a real estate agent.
+
+## Problem
+
+Agents lack time to call leads quickly. Speed to contact wins listings. Manual calling is inconsistent.
+
+## Solution
+
+1. Scrape FSBO listings daily from Zillow (Morris County, NJ initially)
+2. Store leads in Google Sheet
+3. Trigger AI voice calls via Vapi within minutes
+4. Qualify through natural conversation
+5. Book qualified leads on Google Calendar
+6. Notify agent
+
+## Architecture
+```
+Zillow FSBO Scraper (Browse AI)
+         ↓
+Google Sheet (Lead DB)
+         ↓
+n8n Workflow (Orchestrator)
+         ↓
+Vapi AI Voice Agent
+         ↓
+Google Calendar + Notification
+```
+
+## Components
+
+### 1. Scraper (Browse AI)
+- Daily scrape of Zillow FSBO for Morris County
+- Extract: address, city, zip, price, beds, baths, sqft, phone, listing_url
+- Dedupe by address
+- Output to Google Sheet
+
+### 2. Google Sheet Schema
+
+| Column | Purpose |
+|--------|---------|
+| id | Unique ID |
+| date_found | When scraped |
+| address | Property address |
+| city | City |
+| state | State |
+| zip | Zip |
+| price | Asking price |
+| beds | Bedrooms |
+| baths | Bathrooms |
+| sqft | Square feet |
+| phone | Owner phone |
+| listing_url | Zillow link |
+| source | zillow_fsbo |
+| status | New/Calling/Called/Qualified/Not Interested/No Answer/Bad Number |
+| call_attempts | Count |
+| last_call_date | DateTime |
+| call_duration | Seconds |
+| qualified | Yes/No |
+| timeline | 30 days/90 days/flexible |
+| reason_selling | Notes |
+| open_to_agent | Yes/No |
+| objections | Notes |
+| call_summary | AI summary |
+| appointment_booked | Yes/No |
+| appointment_date | DateTime |
+| notes | Misc |
+
+### 3. n8n Workflows
+
+**Workflow 1: New Lead → Call**
+- Trigger: New Sheet row
+- Validate phone → Trigger Vapi → Update status to "Calling"
+
+**Workflow 2: Call Results**
+- Trigger: Vapi webhook
+- Parse results → Update Sheet → If qualified: book calendar + notify
+
+**Workflow 3: Retry (future)**
+- Find No Answer + attempts < 3 → Retry call
+
+### 4. Vapi Voice Agent
+
+**Config:**
+```json
+{
+  "name": "FSBO Qualifier",
+  "voice": "jennifer",
+  "firstMessage": "Hi, is this the owner of the property on {address}?",
+  "model": "gpt-4",
+  "maxDurationSeconds": 300
+}
+```
+
+**Script summary:**
+- Confirm owner
+- Intro: calling on behalf of [AGENT] with [BROKERAGE], saw FSBO listing
+- Value prop: agents often net sellers more even after commission
+- Qualify: timeline, showings, why FSBO, open to agent help
+- If qualified: book phone call or in-person meeting
+- Handle objections: commission concerns, already have agent, not interested
+
+**Data to capture:**
+- qualified (bool)
+- timeline (string)
+- reason_selling (string)
+- open_to_agent (bool)
+- objections (string)
+- appointment_booked (bool)
+- appointment_datetime (ISO)
+- summary (string)
+
+### 5. Google Calendar
+- Create 30-min event with address, price, phone, listing URL, summary
+- 30-min reminder
+
+### 6. Notifications
+- Email on appointment booked
+- Daily summary (future)
+
+## Environment Variables
+```
+GOOGLE_SHEETS_ID=
+GOOGLE_CALENDAR_ID=
+VAPI_API_KEY=
+VAPI_ASSISTANT_ID=
+AGENT_NAME=
+AGENT_PHONE=
+BROKERAGE_NAME=
+TARGET_ZIPCODES=07960,07950,07940
+NOTIFICATION_EMAIL=
+N8N_WEBHOOK_URL=
+```
+
+## MVP Scope
+
+- [x] Browse AI scraper for Zillow FSBO
+- [x] Google Sheet with schema
+- [x] n8n: new lead → Vapi call
+- [x] Vapi agent with script
+- [x] Google Calendar booking
+- [x] Email notification
+
+## Success Metrics
+
+Week 1: 10+ leads scraped, 80%+ call completion, 1+ appointment
+
+## File Structure
+```
+lead-velocity/
+├── README.md
+├── docs/
+│   └── PRD.md
+├── n8n/
+│   └── workflows/
+│       ├── new-lead-caller.json
+│       └── call-results-processor.json
+├── vapi/
+│   └── assistant-config.json
+├── scraper/
+│   └── browse-ai-setup.md
+└── .env.example
+```
+
+## Compliance
+
+- FSBO sellers publicly list phone numbers
+- B2B inquiry (not cold consumer call)
+- NJ = one-party consent
+- AI identifies as calling "on behalf of" agent
