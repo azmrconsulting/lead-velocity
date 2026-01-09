@@ -23,7 +23,7 @@ Zillow FSBO Scraper (Browse AI)
          ↓
 Google Sheet (Lead DB)
          ↓
-n8n Workflow (Orchestrator)
+n8n Workflow (Self-hosted on VPS)
          ↓
 Vapi AI Voice Agent
          ↓
@@ -68,6 +68,14 @@ Google Calendar + Notification
 | appointment_booked | Yes/No |
 | appointment_date | DateTime |
 | notes | Misc |
+| do_not_contact | Yes/No |
+| dnc_reason | User requested/Bad experience/Legal |
+| dnc_date | DateTime |
+| lead_score | 1-100 (price-based) |
+| listing_status | Active/Pending/Sold/Removed |
+| last_verified | DateTime |
+| recording_url | Vapi recording link |
+| assigned_agent | Agent ID (for multi-agent future) |
 
 ### 3. n8n Workflows
 
@@ -121,18 +129,155 @@ Google Calendar + Notification
 - Email on appointment booked
 - Daily summary (future)
 
+### 7. Calling Hours & Time Windows
+- **Allowed hours:** 9:00 AM - 8:00 PM local time (lead's timezone based on zip)
+- **Days:** Monday - Saturday
+- **Blackout:** Sundays, federal holidays
+- **Agent availability:** Define bookable windows in Google Calendar (e.g., Mon-Fri 10am-4pm)
+- **Queue behavior:** Leads outside calling window are queued for next valid slot
+
+### 8. Do Not Call (DNC) Handling
+**Pre-call checks:**
+1. Check internal DNC list (do_not_contact = Yes)
+2. Skip leads with invalid/missing phone
+3. (Future) Check against federal/state DNC registry
+
+**Adding to DNC:**
+- If lead says "don't call" / "remove me" → AI captures, status = "DNC", do_not_contact = Yes
+- Manual add via Sheet
+- Automatic add if lead reports to carrier
+
+**DNC triggers in conversation:**
+- "Stop calling"
+- "Remove my number"
+- "Don't call again"
+- "Not interested, don't contact me"
+
+### 9. AI Disclosure
+**Opening script includes:**
+> "Hi, this is an AI assistant calling on behalf of [AGENT] with [BROKERAGE]..."
+
+- Explicitly identifies as AI upfront
+- NJ does not currently require AI disclosure, but best practice
+- If asked "Are you a robot?": "Yes, I'm an AI assistant. Would you prefer to speak with [AGENT] directly?"
+
+### 10. Call Recording & Storage
+- **Recording:** Vapi stores call recordings
+- **Retention:** 90 days (Vapi default), consider extending for disputes
+- **Access:** recording_url stored in Sheet, included in calendar invite
+- **Transcript:** Stored in call_summary field
+- **PII handling:** Recordings contain phone numbers, addresses - access restricted to agent
+
+### 11. Lead Scoring
+**Score formula (1-100):**
+```
+base_score = 50
++ (price >= 500k) ? 20 : (price >= 300k) ? 10 : 0
++ (beds >= 4) ? 10 : 0
++ (sqft >= 2000) ? 10 : 0
++ (days_on_market <= 7) ? 10 : (days_on_market <= 14) ? 5 : 0
+```
+
+**Call priority:** Higher scores called first within each batch
+
+### 12. Lead Lifecycle
+| Age | Status | Action |
+|-----|--------|--------|
+| 0-7 days | Active | Normal calling |
+| 7-14 days | Aging | Priority if not contacted |
+| 14-30 days | Stale | Final attempt, then archive |
+| 30+ days | Expired | Archive, no calls |
+| Listing removed | Removed | Mark listing_status = Removed, stop calls |
+
+**Verification:** Weekly re-scrape to check if listings still active
+
+### 13. Handoff Process
+**Agent receives before appointment:**
+1. Calendar invite with:
+   - Property address, price, beds/baths/sqft
+   - Owner phone number
+   - Listing URL
+   - Call summary (AI-generated)
+   - Recording link
+   - Lead score
+   - Objections noted
+2. Email notification with same info
+3. (Future) Pre-call brief SMS 1 hour before
+
+**Rescheduling:** Agent manually updates calendar + Sheet
+
+### 14. Voicemail Strategy
+- **Leave voicemail:** Yes, on first attempt only
+- **Script:** "Hi, this is a quick message on behalf of [AGENT] with [BROKERAGE] about your property listing. We'd love to connect. [AGENT] can be reached at [AGENT_PHONE]. Thanks!"
+- **Voicemail counts as:** 0.5 attempt (still retry twice more)
+
+## Security
+
+### API Keys & Credentials
+- All secrets stored in n8n credentials manager (encrypted)
+- VPS environment variables for sensitive config
+- No secrets in code/workflows
+- Google OAuth tokens auto-refresh via n8n
+
+### Access Control
+- Google Sheet: Shared only with agent + service account
+- n8n: Password protected, VPS firewall restricted
+- Vapi: API key scoped to assistant only
+
+### PII Handling
+- Phone numbers, addresses = PII
+- No logging of PII in plain text
+- Sheet access audit via Google Workspace (if available)
+
+## Cost Model
+
+| Component | Pricing | Est. Monthly (100 leads) |
+|-----------|---------|--------------------------|
+| Browse AI | $49/mo (starter) | $49 |
+| Vapi | $0.05/min | ~$50 (avg 2 min/call, 2 attempts) |
+| n8n | Self-hosted (VPS) | $0 (included in VPS) |
+| VPS | Your existing | $0 |
+| Google Workspace | Existing | $0 |
+| **Total** | | **~$99/month** |
+
+**Unit economics:**
+- Cost per lead scraped: ~$0.50
+- Cost per call attempt: ~$0.10
+- Cost per connected call: ~$0.50
+- Cost per appointment: ~$10-20 (assuming 5-10% conversion)
+- Break-even: 1 listing/month covers ~6 months of costs
+
 ## Environment Variables
 ```
+# Google
 GOOGLE_SHEETS_ID=
 GOOGLE_CALENDAR_ID=
+
+# Vapi
 VAPI_API_KEY=
 VAPI_ASSISTANT_ID=
+VAPI_WEBHOOK_SECRET=
+
+# Agent Info
 AGENT_NAME=
 AGENT_PHONE=
 BROKERAGE_NAME=
-TARGET_ZIPCODES=07960,07950,07940
 NOTIFICATION_EMAIL=
+
+# Targeting
+TARGET_ZIPCODES=07960,07950,07940
+
+# Calling Rules
+CALLING_HOURS_START=09:00
+CALLING_HOURS_END=20:00
+CALLING_DAYS=Mon,Tue,Wed,Thu,Fri,Sat
+TIMEZONE=America/New_York
+MAX_CALL_ATTEMPTS=3
+RETRY_DELAY_HOURS=24
+
+# n8n (self-hosted)
 N8N_WEBHOOK_URL=
+N8N_HOST=your-vps-ip-or-domain
 ```
 
 ## MVP Scope
@@ -146,7 +291,44 @@ N8N_WEBHOOK_URL=
 
 ## Success Metrics
 
-Week 1: 10+ leads scraped, 80%+ call completion, 1+ appointment
+### Launch Targets (Week 1)
+- 10+ leads scraped
+- 80%+ call completion rate
+- 1+ appointment booked
+
+### Ongoing KPIs
+
+**Funnel Metrics (track weekly):**
+| Stage | Target |
+|-------|--------|
+| Leads scraped | 20+/week |
+| Calls attempted | 90% of valid leads |
+| Calls connected | 40%+ of attempts |
+| Qualified | 20%+ of connected |
+| Appointments booked | 50%+ of qualified |
+| Appointments kept | 80%+ show rate |
+| Listings signed | Track (no target initially) |
+
+**Conversion rates:**
+- Lead → Connected: 40%
+- Connected → Qualified: 20%
+- Qualified → Appointment: 50%
+- Appointment → Listing: Track
+
+**Cost metrics:**
+- Cost per lead: < $1
+- Cost per appointment: < $25
+- Cost per listing: Track
+
+**Quality metrics:**
+- Avg call duration (connected): 2+ min
+- DNC rate: < 5%
+- Complaint rate: 0
+
+**Operational metrics:**
+- Avg time to first call: < 30 min from scrape
+- Retry queue size: < 20
+- Stuck leads ("Calling" > 1hr): 0
 
 ## File Structure
 ```
@@ -154,20 +336,207 @@ lead-velocity/
 ├── README.md
 ├── docs/
 │   └── PRD.md
+├── clients/
+│   └── {client-id}.json          # Per-client config (agent info, availability, targeting)
 ├── n8n/
 │   └── workflows/
 │       ├── new-lead-caller.json
 │       └── call-results-processor.json
 ├── vapi/
-│   └── assistant-config.json
+│   ├── assistant-config.json     # Template with {{variables}}
+│   └── conversation-script.md    # Full conversation documentation
 ├── scraper/
 │   └── browse-ai-setup.md
 └── .env.example
 ```
+
+## Multi-Client Architecture
+
+Each client gets their own:
+- `clients/{client-id}.json` - Agent info, availability, targeting, voice preference
+- Google Sheet - Separate lead database
+- Google Calendar - Their own booking calendar
+- Vapi Assistant - Created from template with their config
+
+The Vapi `assistant-config.json` is a template. At runtime, n8n:
+1. Loads client config from `clients/{client-id}.json`
+2. Replaces `{{variables}}` in the template
+3. Creates/updates Vapi assistant with client-specific settings
+
+## Design for Failure
+
+### 1. Scraper Failures (Browse AI)
+
+| Failure | Detection | Response |
+|---------|-----------|----------|
+| Zillow blocks/rate limits | Empty results, HTTP 403/429 | Alert + manual review. Rotate IP/proxy. Reduce frequency. |
+| HTML structure changes | Missing fields, parse errors | Alert + pause scraper. Update selectors. |
+| Network timeout | No data within expected window | Retry with exponential backoff (3 attempts) |
+| Duplicate leads | Address already exists | Skip insert, log as duplicate |
+
+**Circuit breaker:** If 3 consecutive scrapes fail, pause and alert.
+
+### 2. Google Sheets Failures
+
+| Failure | Detection | Response |
+|---------|-----------|----------|
+| API quota exceeded | 429 error | Queue writes, retry after cooldown |
+| Auth token expired | 401 error | Auto-refresh token. Alert if refresh fails. |
+| Write conflict | Row locked/version mismatch | Retry with latest data |
+| Sheet deleted/renamed | 404 error | Critical alert. Halt all workflows. |
+
+**Fallback:** Log all operations to local file for manual recovery.
+
+### 3. n8n Workflow Failures
+
+| Failure | Detection | Response |
+|---------|-----------|----------|
+| Workflow execution error | n8n error node triggered | Log error + retry once. Alert on second failure. |
+| Webhook not received | Expected callback missing after 10 min | Mark as "Call Status Unknown", queue for manual review |
+| Timeout (>5 min execution) | Execution killed | Log partial state, alert, manual intervention |
+| n8n service down | Health check fails | Alert. Queue operations for replay. |
+
+**Idempotency:** All workflows must handle duplicate triggers (use lead ID as idempotency key).
+
+### 4. Vapi Call Failures
+
+| Failure | Detection | Response |
+|---------|-----------|----------|
+| Invalid/bad phone number | Vapi returns invalid_number | Status → "Bad Number", no retry |
+| No answer | Vapi returns no_answer | Status → "No Answer", schedule retry (max 3 attempts) |
+| Voicemail reached | Vapi detects voicemail | Status → "Voicemail", optionally leave message, schedule retry |
+| Call dropped mid-conversation | Duration < 30s, incomplete data | Status → "Call Failed", retry in 1 hour |
+| Vapi API error (5xx) | HTTP 500+ response | Retry with exponential backoff. Alert after 3 failures. |
+| Vapi rate limited | HTTP 429 | Queue call, respect rate limit headers |
+| Transcription/parsing failed | Missing required fields in response | Status → "Review Needed", alert for manual review |
+| Webhook callback failed | n8n never receives result | Polling fallback: query Vapi for call status after 10 min |
+
+**Daily reconciliation:** Compare calls initiated vs callbacks received. Flag discrepancies.
+
+### 5. Calendar Booking Failures
+
+| Failure | Detection | Response |
+|---------|-----------|----------|
+| Double booking | Calendar returns conflict | Find next available slot, rebook, note in summary |
+| API quota exceeded | 429 error | Queue booking, retry, alert agent |
+| Auth expired | 401 error | Auto-refresh. Alert if fails. |
+| Invalid datetime from AI | Parse error | Default to "TBD", alert for manual booking |
+
+**Fallback:** If booking fails, still mark lead as qualified + send notification with "BOOKING FAILED - MANUAL ACTION REQUIRED".
+
+### 6. Notification Failures
+
+| Failure | Detection | Response |
+|---------|-----------|----------|
+| Email delivery failed | Bounce/error from provider | Retry once. Log failure. Consider SMS backup. |
+| Email delayed | No confirmation within 5 min | Log warning, continue |
+
+**Backup channel:** If email fails twice, send SMS to AGENT_PHONE.
+
+### 7. Data Integrity
+
+| Issue | Prevention | Recovery |
+|-------|------------|----------|
+| Partial writes | Atomic operations where possible | Reconciliation job compares expected vs actual state |
+| Lost updates | Optimistic locking (version column) | Alert on conflict, manual merge |
+| Orphaned records | Foreign key validation in workflow | Daily cleanup job |
+
+### 8. Monitoring & Alerting
+
+**Health checks (every 5 min):**
+- Browse AI last successful scrape < 25 hours ago
+- Google Sheets API responding
+- n8n workflows enabled and healthy
+- Vapi API responding
+
+**Alerts (immediate):**
+- Any critical failure (Sheet deleted, auth broken)
+- 3+ consecutive call failures
+- No new leads in 48 hours
+- Qualified lead with failed booking
+
+**Daily digest:**
+- Leads scraped vs calls made vs completed
+- Success/failure rates by stage
+- Leads stuck in "Calling" status > 1 hour
+- Retry queue size
+
+### 9. Retry Strategy
+
+```
+Stage           Max Retries    Backoff              Final Action
+─────────────────────────────────────────────────────────────────
+Scrape          3              Exponential (1m,5m,15m)   Alert
+Sheet Write     5              Linear (10s)              Log locally
+Vapi Call       1 (immediate)  -                         Queue for scheduled retry
+Scheduled Retry 3              24h, 48h, 72h             Status → "Max Attempts"
+Calendar Book   3              Exponential (1m,5m,15m)   Alert + manual flag
+Email           2              5 min                     SMS fallback
+```
+
+### 10. Recovery Procedures
+
+**Full system recovery:**
+1. Check all OAuth tokens valid
+2. Verify Sheet schema unchanged
+3. Run reconciliation: `leads in Calling status > 1hr` → reset to New
+4. Replay failed webhooks from n8n execution log
+5. Resume workflows
+
+**Single lead recovery:**
+1. Check lead status in Sheet
+2. Query Vapi API for call history by phone
+3. Manually update Sheet with correct status
+4. Re-trigger workflow if needed
 
 ## Compliance
 
 - FSBO sellers publicly list phone numbers
 - B2B inquiry (not cold consumer call)
 - NJ = one-party consent
-- AI identifies as calling "on behalf of" agent
+- AI identifies as AI calling "on behalf of" agent
+- Internal DNC list maintained
+- Calling hours restricted to 9am-8pm local time
+
+## Future Features (Post-MVP Roadmap)
+
+### Phase 2: Optimization
+- [ ] SMS follow-up for no-answers
+- [ ] Pre-call brief SMS to agent 1 hour before appointment
+- [ ] Daily summary email with funnel metrics
+- [ ] A/B test different opening scripts
+- [ ] Warm transfer option (connect live to agent mid-call)
+
+### Phase 3: Scale
+- [ ] Multi-agent support with lead routing
+- [ ] Multi-market expansion (additional counties/states)
+- [ ] Additional lead sources:
+  - [ ] Expired listings (MLS)
+  - [ ] Pre-foreclosure
+  - [ ] Redfin FSBO
+  - [ ] Facebook Marketplace
+- [ ] Federal/state DNC registry integration
+- [ ] Volume controls per agent per day
+
+### Phase 4: Intelligence
+- [ ] Agent dashboard (lead stats, call recordings, pipeline)
+- [ ] CRM integration (HubSpot, Follow Up Boss)
+- [ ] Predictive lead scoring (ML-based)
+- [ ] Sentiment analysis on calls
+- [ ] Optimal call time prediction
+- [ ] Competitor listing analysis
+
+### Phase 5: Automation
+- [ ] Auto-reschedule if agent declines
+- [ ] Auto-follow-up sequence (call → SMS → email)
+- [ ] Listing status auto-update from MLS
+- [ ] Auto-archive stale leads
+- [ ] Self-healing workflows (auto-retry failed steps)
+
+### Backlog (Ideas)
+- WhatsApp integration for leads who prefer text
+- Multilingual support (Spanish)
+- Video message option
+- Referral tracking (if lead mentions another seller)
+- Integration with showing scheduling tools
+- Zillow Premier Agent API (if available)

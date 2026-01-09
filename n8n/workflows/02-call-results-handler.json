@@ -1,0 +1,246 @@
+{
+  "name": "Lead Velocity - Call Results Handler",
+  "nodes": [
+    {
+      "id": "webhook",
+      "name": "Vapi Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "position": [0, 0],
+      "webhookId": "vapi-call-results",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "vapi-callback",
+        "options": {
+          "responseMode": "onReceived",
+          "responseData": "allEntries"
+        }
+      },
+      "notes": "Receives call results from Vapi when call ends"
+    },
+    {
+      "id": "parse_results",
+      "name": "Parse Call Results",
+      "type": "n8n-nodes-base.code",
+      "position": [200, 0],
+      "parameters": {
+        "jsCode": "const data = items[0].json;\n\n// Extract structured data from Vapi analysis\nconst analysis = data.analysis || {};\nconst structuredData = analysis.structuredData || {};\nconst metadata = data.metadata || {};\n\n// Determine call outcome\nlet status = 'connected';\nif (data.endedReason === 'no-answer') status = 'no_answer';\nelse if (data.endedReason === 'voicemail') status = 'voicemail';\nelse if (data.endedReason === 'failed') status = 'bad_number';\nelse if (structuredData.dnc_requested) status = 'dnc';\nelse if (structuredData.qualified) status = 'qualified';\nelse if (structuredData.open_to_agent === 'no') status = 'not_interested';\n\nreturn [{\n  json: {\n    lead_id: metadata.lead_id,\n    client_id: metadata.client_id,\n    vapi_call_id: data.id,\n    \n    // Call metadata\n    call_duration: data.duration || 0,\n    recording_url: data.recordingUrl || '',\n    \n    // Parsed results\n    status: status,\n    owner_confirmed: structuredData.owner_confirmed || false,\n    qualified: structuredData.qualified || false,\n    timeline: structuredData.timeline || 'unknown',\n    reason_selling: structuredData.reason_selling || '',\n    open_to_agent: structuredData.open_to_agent || 'unknown',\n    objections: structuredData.objections || '',\n    call_summary: analysis.summary || '',\n    \n    // Appointment\n    appointment_booked: structuredData.appointment_booked || false,\n    appointment_date: structuredData.appointment_datetime || '',\n    appointment_type: 'phone',\n    \n    // Callback\n    callback_requested: structuredData.callback_requested || false,\n    callback_date: structuredData.callback_datetime || '',\n    \n    // DNC\n    do_not_contact: structuredData.dnc_requested || false,\n    dnc_reason: structuredData.dnc_requested ? 'User requested' : '',\n    dnc_date: structuredData.dnc_requested ? new Date().toISOString() : ''\n  }\n}];"
+      },
+      "notes": "Parse Vapi response into sheet-friendly format"
+    },
+    {
+      "id": "update_sheet",
+      "name": "Update Lead in Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [400, 0],
+      "parameters": {
+        "operation": "update",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "status": "={{ $json.status }}",
+            "call_duration": "={{ $json.call_duration }}",
+            "owner_confirmed": "={{ $json.owner_confirmed }}",
+            "qualified": "={{ $json.qualified }}",
+            "timeline": "={{ $json.timeline }}",
+            "reason_selling": "={{ $json.reason_selling }}",
+            "open_to_agent": "={{ $json.open_to_agent }}",
+            "objections": "={{ $json.objections }}",
+            "call_summary": "={{ $json.call_summary }}",
+            "appointment_booked": "={{ $json.appointment_booked }}",
+            "appointment_date": "={{ $json.appointment_date }}",
+            "appointment_type": "={{ $json.appointment_type }}",
+            "callback_requested": "={{ $json.callback_requested }}",
+            "callback_date": "={{ $json.callback_date }}",
+            "do_not_contact": "={{ $json.do_not_contact }}",
+            "dnc_reason": "={{ $json.dnc_reason }}",
+            "dnc_date": "={{ $json.dnc_date }}",
+            "recording_url": "={{ $json.recording_url }}",
+            "vapi_call_id": "={{ $json.vapi_call_id }}",
+            "updated_at": "={{ $now.toISOString() }}"
+          }
+        },
+        "options": {
+          "cellFormat": "USER_ENTERED"
+        },
+        "matchingColumns": ["id"]
+      },
+      "notes": "Update lead record with call results"
+    },
+    {
+      "id": "check_appointment",
+      "name": "Appointment Booked?",
+      "type": "n8n-nodes-base.if",
+      "position": [600, 0],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.appointment_booked }}",
+              "value2": true,
+              "operation": "equals"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "get_lead_details",
+      "name": "Get Full Lead Details",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [800, 0],
+      "parameters": {
+        "operation": "read",
+        "documentId": "={{ $env.GOOGLE_SHEETS_ID }}",
+        "sheetName": "Leads",
+        "options": {
+          "filter": {
+            "column": "id",
+            "value": "={{ $json.lead_id }}"
+          }
+        }
+      },
+      "notes": "Fetch full lead data for calendar event"
+    },
+    {
+      "id": "create_calendar_event",
+      "name": "Create Calendar Event",
+      "type": "n8n-nodes-base.googleCalendar",
+      "position": [1000, 0],
+      "parameters": {
+        "operation": "create",
+        "calendarId": "={{ $env.GOOGLE_CALENDAR_ID }}",
+        "start": "={{ $json.appointment_date }}",
+        "end": "={{ DateTime.fromISO($json.appointment_date).plus({ minutes: 30 }).toISO() }}",
+        "summary": "FSBO Call: {{ $json.address }}",
+        "description": "**Property:** {{ $json.address }}, {{ $json.city }}, {{ $json.state }} {{ $json.zip }}\n**Price:** ${{ $json.price }}\n**Beds/Baths:** {{ $json.beds }}/{{ $json.baths }}\n**Sqft:** {{ $json.sqft }}\n\n**Owner Phone:** {{ $json.phone }}\n**Listing:** {{ $json.listing_url }}\n\n**Timeline:** {{ $json.timeline }}\n**Call Summary:** {{ $json.call_summary }}\n**Objections:** {{ $json.objections }}\n\n**Recording:** {{ $json.recording_url }}",
+        "additionalFields": {
+          "reminders": {
+            "useDefault": false,
+            "overrides": [
+              { "method": "popup", "minutes": 30 },
+              { "method": "email", "minutes": 60 }
+            ]
+          }
+        }
+      },
+      "notes": "Create calendar event for booked appointment"
+    },
+    {
+      "id": "send_notification",
+      "name": "Send Email Notification",
+      "type": "n8n-nodes-base.emailSend",
+      "position": [1200, 0],
+      "parameters": {
+        "fromEmail": "={{ $env.EMAIL_FROM }}",
+        "toEmail": "={{ $env.NOTIFICATION_EMAIL }}",
+        "subject": "New Appointment Booked: {{ $json.address }}",
+        "text": "A new appointment has been booked!\n\nProperty: {{ $json.address }}, {{ $json.city }}, {{ $json.state }} {{ $json.zip }}\nPrice: ${{ $json.price }}\nBeds/Baths: {{ $json.beds }}/{{ $json.baths }}\n\nAppointment: {{ $json.appointment_date }}\nOwner Phone: {{ $json.phone }}\n\nTimeline: {{ $json.timeline }}\nCall Summary: {{ $json.call_summary }}\n\nRecording: {{ $json.recording_url }}\nListing: {{ $json.listing_url }}",
+        "options": {}
+      },
+      "notes": "Notify agent of new appointment"
+    },
+    {
+      "id": "check_callback",
+      "name": "Callback Requested?",
+      "type": "n8n-nodes-base.if",
+      "position": [800, 200],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.callback_requested }}",
+              "value2": true,
+              "operation": "equals"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "schedule_callback",
+      "name": "Schedule Callback Reminder",
+      "type": "n8n-nodes-base.googleCalendar",
+      "position": [1000, 200],
+      "parameters": {
+        "operation": "create",
+        "calendarId": "={{ $env.GOOGLE_CALENDAR_ID }}",
+        "start": "={{ $json.callback_date || DateTime.now().plus({ days: 1 }).set({ hour: 10, minute: 0 }).toISO() }}",
+        "end": "={{ DateTime.fromISO($json.callback_date || DateTime.now().plus({ days: 1 }).toISO()).plus({ minutes: 15 }).toISO() }}",
+        "summary": "Callback: {{ $json.address }}",
+        "description": "Lead requested callback.\n\nPhone: {{ $json.phone }}\nAddress: {{ $json.address }}\n\nOriginal call summary: {{ $json.call_summary }}"
+      },
+      "notes": "Create reminder for requested callback"
+    },
+    {
+      "id": "check_retry",
+      "name": "Needs Retry?",
+      "type": "n8n-nodes-base.if",
+      "position": [600, 400],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.status }}",
+              "value2": "no_answer",
+              "operation": "equals"
+            }
+          ]
+        }
+      },
+      "notes": "Check if we should retry this lead later"
+    },
+    {
+      "id": "done",
+      "name": "Done",
+      "type": "n8n-nodes-base.noOp",
+      "position": [1000, 400],
+      "notes": "Processing complete"
+    }
+  ],
+  "connections": {
+    "Vapi Webhook": {
+      "main": [[{ "node": "Parse Call Results", "type": "main", "index": 0 }]]
+    },
+    "Parse Call Results": {
+      "main": [[{ "node": "Update Lead in Sheet", "type": "main", "index": 0 }]]
+    },
+    "Update Lead in Sheet": {
+      "main": [[{ "node": "Appointment Booked?", "type": "main", "index": 0 }]]
+    },
+    "Appointment Booked?": {
+      "main": [
+        [{ "node": "Get Full Lead Details", "type": "main", "index": 0 }],
+        [{ "node": "Check Callback", "type": "main", "index": 0 }]
+      ]
+    },
+    "Get Full Lead Details": {
+      "main": [[{ "node": "Create Calendar Event", "type": "main", "index": 0 }]]
+    },
+    "Create Calendar Event": {
+      "main": [[{ "node": "Send Email Notification", "type": "main", "index": 0 }]]
+    },
+    "Send Email Notification": {
+      "main": [[{ "node": "Done", "type": "main", "index": 0 }]]
+    },
+    "Check Callback": {
+      "main": [
+        [{ "node": "Schedule Callback Reminder", "type": "main", "index": 0 }],
+        [{ "node": "Check Retry", "type": "main", "index": 0 }]
+      ]
+    },
+    "Schedule Callback Reminder": {
+      "main": [[{ "node": "Done", "type": "main", "index": 0 }]]
+    },
+    "Check Retry": {
+      "main": [
+        [{ "node": "Done", "type": "main", "index": 0 }],
+        [{ "node": "Done", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

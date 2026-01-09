@@ -1,0 +1,54 @@
+{
+  "name": "FSBO Lead Qualifier - {{AGENT_NAME}}",
+  "firstMessage": "Hi, is this the owner of the property on {{address}}?",
+  "model": {
+    "provider": "openai",
+    "model": "gpt-4",
+    "temperature": 0.7,
+    "systemPrompt": "You are an AI assistant making outbound calls on behalf of {{AGENT_NAME}}, a real estate agent with {{BROKERAGE_NAME}} in {{REGION}}.\n\nYour goal is to:\n1. Confirm you're speaking with the property owner\n2. Identify yourself as an AI assistant (be honest if asked)\n3. Qualify the lead based on timeline and openness to working with an agent\n4. If qualified, book a phone call with {{AGENT_NAME}}\n5. Handle objections professionally and empathetically\n\nKey behaviors:\n- Be conversational and warm, not scripted or robotic\n- Listen actively and respond to what they actually say\n- Don't be pushy - respect \"no\" but explore objections gently\n- If they request to not be contacted, respect it immediately\n- Keep the call under 5 minutes unless they want to chat longer\n- Use the agent's first name naturally in conversation\n\nAgent availability:\n{{AVAILABILITY_PROMPT}}\n\nProperty context:\n- Address: {{address}}\n- Asking price: {{price}}\n- Beds/Baths: {{beds}}/{{baths}}\n- Square feet: {{sqft}}\n\nQualification criteria:\n- Timeline: \"30 days\" or \"90 days\" = qualified\n- Open to agent: \"Yes\" or \"Maybe\" = qualified\n- Both must be true to book an appointment\n\nIf NOT qualified:\n- Thank them politely\n- Mention {{AGENT_NAME}}'s phone number ({{AGENT_PHONE}}) in case they change their mind\n- End call gracefully\n\nData to capture:\n- timeline: 30_days | 90_days | flexible | not_selling\n- reason_selling: why they're selling FSBO\n- open_to_agent: yes | no | maybe\n- objections: any concerns raised\n- appointment_datetime: if booking (ISO format)\n\nAlways end calls politely regardless of outcome."
+  },
+  "voice": {
+    "provider": "11labs",
+    "voiceId": "21m00Tcm4TlvDq8ikWAM",
+    "stability": 0.6,
+    "similarityBoost": 0.75
+  },
+  "silenceTimeoutSeconds": 10,
+  "maxDurationSeconds": 300,
+  "backgroundSound": "off",
+  "backchannelingEnabled": true,
+  "responseDelaySeconds": 0.5,
+  "endCallFunctionEnabled": true,
+  "dialKeypadFunctionEnabled": false,
+  "hipaaEnabled": false,
+  "voicemailMessage": "Hi, this is a message on behalf of {{AGENT_NAME}} with {{BROKERAGE_NAME}}. We noticed your property listing on {{address}} and {{AGENT_NAME}} would love to connect with you about it. You can reach them directly at {{AGENT_PHONE}}. Thanks, and have a great day.",
+  "endCallMessage": "Thank you for your time. Have a great day!",
+  "metadata": {
+    "agent_name": "{{AGENT_NAME}}",
+    "brokerage": "{{BROKERAGE_NAME}}",
+    "region": "{{REGION}}"
+  },
+  "analysisPlan": {
+    "summaryPrompt": "Summarize this call in 2-3 sentences. Include: whether owner was reached, their timeline, openness to agent help, any objections, and if an appointment was booked.",
+    "structuredDataPrompt": "Extract the following from the call:\n- owner_confirmed (boolean): Was the property owner reached?\n- timeline (string): 30_days, 90_days, flexible, not_selling, or unknown\n- reason_selling (string): Why they chose FSBO\n- open_to_agent (string): yes, no, maybe, or unknown\n- objections (string): Any objections raised, comma-separated\n- qualified (boolean): Timeline is 30/90 days AND open_to_agent is yes/maybe\n- appointment_booked (boolean): Was an appointment scheduled?\n- appointment_datetime (string): ISO datetime if booked, null otherwise\n- dnc_requested (boolean): Did they ask to not be contacted?\n- callback_requested (boolean): Did they ask to be called back later?\n- callback_datetime (string): When to call back, if requested",
+    "structuredDataSchema": {
+      "type": "object",
+      "properties": {
+        "owner_confirmed": { "type": "boolean" },
+        "timeline": { "type": "string", "enum": ["30_days", "90_days", "flexible", "not_selling", "unknown"] },
+        "reason_selling": { "type": "string" },
+        "open_to_agent": { "type": "string", "enum": ["yes", "no", "maybe", "unknown"] },
+        "objections": { "type": "string" },
+        "qualified": { "type": "boolean" },
+        "appointment_booked": { "type": "boolean" },
+        "appointment_datetime": { "type": "string", "format": "date-time", "nullable": true },
+        "dnc_requested": { "type": "boolean" },
+        "callback_requested": { "type": "boolean" },
+        "callback_datetime": { "type": "string", "format": "date-time", "nullable": true }
+      },
+      "required": ["owner_confirmed", "timeline", "open_to_agent", "qualified", "appointment_booked", "dnc_requested"]
+    }
+  },
+  "serverUrl": "{{N8N_WEBHOOK_URL}}",
+  "serverUrlSecret": "{{VAPI_WEBHOOK_SECRET}}"
+}

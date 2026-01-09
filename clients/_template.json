@@ -1,0 +1,67 @@
+{
+  "client_id": "",
+  "active": false,
+
+  "agent": {
+    "name": "",
+    "first_name": "",
+    "phone": "",
+    "email": "",
+    "brokerage": "",
+    "region": ""
+  },
+
+  "availability": {
+    "days": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+    "hours_start": "09:00",
+    "hours_end": "17:00",
+    "timezone": "America/New_York",
+    "blackout_days": ["saturday", "sunday"],
+    "appointment_type": "phone_only",
+    "appointment_duration_minutes": 30,
+    "buffer_between_appointments_minutes": 15
+  },
+
+  "availability_prompt": "",
+
+  "calling": {
+    "hours_start": "09:00",
+    "hours_end": "20:00",
+    "max_attempts": 3,
+    "retry_delay_hours": 24,
+    "leave_voicemail": true
+  },
+
+  "targeting": {
+    "zipcodes": [],
+    "county": "",
+    "state": "",
+    "min_price": 0,
+    "max_price": null,
+    "property_types": ["single_family", "condo", "townhouse"]
+  },
+
+  "voice": {
+    "provider": "11labs",
+    "voice_id": "21m00Tcm4TlvDq8ikWAM",
+    "voice_name": "Rachel",
+    "gender": "female"
+  },
+
+  "notifications": {
+    "email": "",
+    "sms": "",
+    "notify_on_appointment": true,
+    "notify_on_qualified_lead": true,
+    "daily_summary": false
+  },
+
+  "google": {
+    "sheets_id": "",
+    "calendar_id": ""
+  },
+
+  "vapi": {
+    "assistant_id": ""
+  }
+}

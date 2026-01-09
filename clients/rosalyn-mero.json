@@ -1,0 +1,67 @@
+{
+  "client_id": "rosalyn-mero",
+  "active": true,
+
+  "agent": {
+    "name": "Rosalyn Mero",
+    "first_name": "Rosalyn",
+    "phone": "862-246-1327",
+    "email": "",
+    "brokerage": "X Realty Corp",
+    "region": "Morris County, NJ"
+  },
+
+  "availability": {
+    "days": ["monday", "tuesday", "thursday", "friday", "saturday"],
+    "hours_start": "10:00",
+    "hours_end": "19:00",
+    "timezone": "America/New_York",
+    "blackout_days": ["wednesday", "sunday"],
+    "appointment_type": "phone_only",
+    "appointment_duration_minutes": 30,
+    "buffer_between_appointments_minutes": 15
+  },
+
+  "availability_prompt": "Days: Monday, Tuesday, Thursday, Friday, Saturday\nNOT available: Wednesday, Sunday\nHours: 10:00 AM to 7:00 PM Eastern\nOnly book phone calls (property visits come after initial call)",
+
+  "calling": {
+    "hours_start": "09:00",
+    "hours_end": "20:00",
+    "max_attempts": 3,
+    "retry_delay_hours": 24,
+    "leave_voicemail": true
+  },
+
+  "targeting": {
+    "zipcodes": ["07960", "07950", "07940"],
+    "county": "Morris",
+    "state": "NJ",
+    "min_price": 0,
+    "max_price": null,
+    "property_types": ["single_family", "condo", "townhouse"]
+  },
+
+  "voice": {
+    "provider": "11labs",
+    "voice_id": "21m00Tcm4TlvDq8ikWAM",
+    "voice_name": "Rachel",
+    "gender": "female"
+  },
+
+  "notifications": {
+    "email": "",
+    "sms": "862-246-1327",
+    "notify_on_appointment": true,
+    "notify_on_qualified_lead": true,
+    "daily_summary": true
+  },
+
+  "google": {
+    "sheets_id": "1aaKMddkHJ4IQ3ZGbjYON6Q4AFzsu0oAXtWWSspk_ANbtjn-LkwhImb7I",
+    "calendar_id": ""
+  },
+
+  "vapi": {
+    "assistant_id": ""
+  }
+}
